@@ -1,4 +1,4 @@
-package com.example.myapplication1 // ⬅️ 사용자님 프로젝트 이름 확인!
+package com.example.myapplication1
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -13,7 +13,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication1.ui.theme.MyApplicationTheme // ⬅️ 사용자님 테마 이름 확인!
+import com.example.myapplication1.ui.theme.MyApplicationTheme
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone // TimeZone import 추가
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,12 +38,64 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// 🔥 Firestore 저장 함수
+fun saveSensorData(gas: String, shock: String, dist: String) {
+    val db = FirebaseFirestore.getInstance()
+
+    // 1. 현재 한국 시간(KST) 포맷 생성
+    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA)
+    // 타임존을 'Asia/Seoul'로 명시적으로 설정하여 KST를 보장합니다.
+    sdf.timeZone = TimeZone.getTimeZone("Asia/Seoul")
+
+    val currentTimeString = sdf.format(Date())
+
+    // 2. 문서 ID로 사용할 시간 포맷 (예: yyyyMMdd_HHmmss_SSS)
+    // SSS는 밀리초를 의미하며, 중복 방지에 유용합니다.
+    val idFormat = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.KOREA)
+    idFormat.timeZone = TimeZone.getTimeZone("Asia/Seoul")
+    val documentId = idFormat.format(Date())
+
+    // 3. 필드에 저장할 데이터 구성
+    val data = hashMapOf(
+        "gas" to gas,
+        "shock" to shock,
+        "distance" to dist,
+        "timestamp_kst" to currentTimeString // KST 문자열 시간 저장
+    )
+
+    // 4. add() 대신 set()을 사용하여 문서 ID를 지정합니다.
+    db.collection("sensorData")
+        .document(documentId) // << 무작위 ID 대신 KST 시간 기반 ID 사용
+        .set(data)
+        .addOnSuccessListener {
+            println("✅ Firestore 저장 성공 - ID: $documentId")
+        }
+        .addOnFailureListener { e ->
+            println("❌ Firestore 저장 실패: ${e.localizedMessage}")
+        }
+}
+
 @Composable
 fun RealtimeDataScreen() {
-    // 수신된 숫자를 저장할 기억 상자들 (초기값은 0)
     var gasValue by remember { mutableStateOf("0") }
     var shockValue by remember { mutableStateOf("0") }
     var distValue by remember { mutableStateOf("0") }
+
+    // 🔥 앱 실행 후 10초마다 자동 저장되는 코드
+    LaunchedEffect(Unit) {
+        while (true) {
+            // 랜덤값(센서 시뮬레이션)
+            gasValue = (100..2000).random().toString()
+            shockValue = (0..1).random().toString()
+            distValue = (5..50).random().toString()
+
+            // Firestore 저장
+            saveSensorData(gasValue, shockValue, distValue)
+
+            // 10초 대기 = 몇초후에 저장할지 설정 가능기능
+            delay(10_000)
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -46,25 +105,20 @@ fun RealtimeDataScreen() {
         Text("실시간 센서 데이터", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(40.dp))
 
-        // 1. 가스 값 표시 카드
         DataCard(title = "가스 농도 (MQ-2)", value = gasValue, unit = "", color = Color(0xFF4CAF50))
-
-        // 2. 충격 값 표시 카드
         DataCard(title = "충격 감지 (SW-420)", value = shockValue, unit = "(0=없음, 1=충격)", color = Color(0xFFFF9800))
-
-        // 3. 거리 값 표시 카드
         DataCard(title = "안전고리 거리 (HC-SR04)", value = distValue, unit = "cm", color = Color(0xFF2196F3))
 
         Spacer(modifier = Modifier.height(50.dp))
 
-        // 테스트용 버튼 (블루투스 연결 전 화면 확인용)
+        // ✔ 수동 저장 버튼도 유지하고 싶으면 그대로 둬도 됨
         Button(onClick = {
-            // 버튼을 누르면 랜덤한 숫자가 들어온 것처럼 화면이 바뀜
             gasValue = (100..2000).random().toString()
             shockValue = (0..1).random().toString()
             distValue = (5..50).random().toString()
+            saveSensorData(gasValue, shockValue, distValue)
         }) {
-            Text("데이터 수신 테스트 (랜덤)")
+            Text("데이터 수동 저장 (랜덤)")
         }
     }
 }
@@ -85,7 +139,12 @@ fun DataCard(title: String, value: String, unit: String, color: Color) {
                 Text(text = value, color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
                 if (unit.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(5.dp))
-                    Text(text = unit, color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(
+                        text = unit,
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                 }
             }
         }
