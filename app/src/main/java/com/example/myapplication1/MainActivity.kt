@@ -33,7 +33,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-// 🔥 Google Maps Compose Imports 추가
+// Google Maps Compose Imports
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
@@ -42,6 +42,7 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.delay // 🔥 delay 사용을 위해 추가
 
 // 화면 상태를 정의하는 Enum
 enum class ScreenState {
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1. 권한 요청 (위치 정보 권한 추가)
+        // 1. 권한 요청
         val requestPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { }
@@ -64,8 +65,8 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.BLUETOOTH_ADMIN,
                 Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.ACCESS_FINE_LOCATION, // 정밀 위치
-                Manifest.permission.ACCESS_COARSE_LOCATION // 대략적인 위치
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
             )
         )
 
@@ -75,9 +76,7 @@ class MainActivity : ComponentActivity() {
                 var currentScreen by remember { mutableStateOf(ScreenState.MAIN_SCREEN) }
 
                 when (currentScreen) {
-                    // 메인 화면 (BLE/GPS 센서 데이터 표시 및 Firestore 저장)
                     ScreenState.MAIN_SCREEN -> BleSensorScreen { currentScreen = ScreenState.MAP_SCREEN }
-                    // 🔥 지도 화면을 실제 MapScreen으로 변경
                     ScreenState.MAP_SCREEN -> MapScreen { currentScreen = ScreenState.MAIN_SCREEN }
                 }
             }
@@ -85,33 +84,33 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// 2. BLE UUID (아두이노 코드와 동일)
+// 2. BLE UUID
 val SERVICE_UUID = UUID.fromString("0000180C-0000-1000-8000-00805F9B34FB")
 val CHAR_UUID    = UUID.fromString("00002A56-0000-1000-8000-00805F9B34FB")
 
 
-// 🔥 Firestore 저장 함수: GPS 정보를 추가하여 KST로 저장
+// Firestore 저장 함수: KST로 저장
 fun saveSensorDataKst(gas: String, shock: String, dist: String, lat: Double, lng: Double) {
     val db = FirebaseFirestore.getInstance()
 
-    // 1. 현재 한국 시간(KST) 포맷 생성 (필드에 저장할 시간 문자열)
+    // 1. 현재 한국 시간(KST) 포맷 생성
     val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA)
     sdf.timeZone = TimeZone.getTimeZone("Asia/Seoul")
     val currentTimeString = sdf.format(Date())
 
-    // 2. 문서 ID로 사용할 시간 포맷 (밀리초까지 포함하여 고유성 확보)
+    // 2. 문서 ID로 사용할 시간 포맷
     val idFormat = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.KOREA)
     idFormat.timeZone = TimeZone.getTimeZone("Asia/Seoul")
     val documentId = idFormat.format(Date())
 
-    // 3. 필드에 저장할 데이터 구성 (GPS 정보 추가)
+    // 3. 필드에 저장할 데이터 구성
     val data = hashMapOf(
         "gas" to gas,
         "shock" to shock,
         "distance" to dist,
-        "latitude" to lat,   // GPS 위도 추가
-        "longitude" to lng,  // GPS 경도 추가
-        "timestamp_kst" to currentTimeString // KST 문자열 시간 저장
+        "latitude" to lat,
+        "longitude" to lng,
+        "timestamp_kst" to currentTimeString
     )
 
     // 4. set()을 사용하여 지정된 문서 ID로 저장
@@ -128,7 +127,7 @@ fun saveSensorDataKst(gas: String, shock: String, dist: String, lat: Double, lng
 
 @SuppressLint("MissingPermission")
 @Composable
-fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함수를 인수로 받음
+fun BleSensorScreen(onNavigateToMap: () -> Unit) {
     val context = LocalContext.current
     val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     val bluetoothAdapter = bluetoothManager.adapter
@@ -138,15 +137,15 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
     var shockValue by remember { mutableStateOf("0") }
     var distValue by remember { mutableStateOf("0") }
 
-    // 🔥 GPS 상태 변수 추가
+    // GPS 상태 변수
     var latitude by remember { mutableStateOf(0.0) }
     var longitude by remember { mutableStateOf(0.0) }
     var locationStatus by remember { mutableStateOf("위치 정보 대기 중...") }
 
-    // 🔥 Fused Location Provider Client 초기화
+    // Fused Location Provider Client 초기화
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // 🔥 Location Callback 정의: 위치가 업데이트될 때마다 호출됨
+    // Location Callback 정의
     val locationCallback = remember {
         object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
@@ -161,15 +160,15 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
         }
     }
 
-    // 🔥 위치 업데이트 요청 (앱 로드 시 5초마다 위치 업데이트 요청)
+    // 위치 업데이트 요청 (GPS) - 5초 주기 유지
     LaunchedEffect(Unit) {
         val locationPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
         if (locationPermission) {
             val locationRequest = LocationRequest.create().apply {
-                interval = 5000 // 5초마다
-                fastestInterval = 3000 // 가장 빠른 간격
+                interval = 5000
+                fastestInterval = 3000
                 priority = LocationRequest.PRIORITY_HIGH_ACCURACY
             }
 
@@ -180,6 +179,25 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
             )
         } else {
             locationStatus = "GPS 권한이 없습니다."
+        }
+    }
+
+    // 🔥 10초마다 Firestore에 데이터 저장하는 로직 추가
+    LaunchedEffect(Unit) {
+        while (true) {
+            // 10초 대기
+            delay(10000L)
+
+            // 현재 상태 변수들의 값을 읽어 Firestore에 저장
+            // GPS와 BLE 값은 이 시점에 가장 최신 상태를 반영
+            saveSensorDataKst(
+                gas = gasValue,
+                shock = shockValue,
+                dist = distValue,
+                lat = latitude,
+                lng = longitude
+            )
+            Log.d("FirestoreTimer", "10초 주기 저장 실행. Time: ${SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(Date())}")
         }
     }
 
@@ -216,13 +234,10 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
                     val newShock = parts[1]
                     val newDist = parts[2]
 
-                    // Compose 상태 업데이트
+                    // Compose 상태 업데이트만 수행 (Firestore 저장은 10초 주기로 분리됨)
                     gasValue = newGas
                     shockValue = newShock
                     distValue = newDist
-
-                    // 🔥 Firestore에 실시간 데이터 저장 (GPS 좌표 포함)
-                    saveSensorDataKst(newGas, newShock, newDist, latitude, longitude) // GPS 좌표 전달
                 }
             }
         }
@@ -238,7 +253,7 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
         Spacer(modifier = Modifier.height(16.dp))
         Divider()
 
-        // GPS 상태 표시 추가
+        // GPS 상태 표시
         Text("BLE 상태: $connectionStatus", color = Color.DarkGray, fontSize = 16.sp, modifier = Modifier.padding(vertical = 4.dp))
         Text("GPS 상태: $locationStatus", color = Color.DarkGray, fontSize = 16.sp, modifier = Modifier.padding(vertical = 4.dp))
         Text("위치: Lat ${String.format("%.4f", latitude)}, Lng ${String.format("%.4f", longitude)}",
@@ -274,6 +289,7 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
         val gasInt = gasValue.toIntOrNull() ?: 0
         val gasIsDanger = gasInt > GAS_DANGER_THRESHOLD
 
+        // 1. 가스 농도 카드
         GasDataCard(
             gasValue = gasValue,
             gasIsDanger = gasIsDanger,
@@ -281,20 +297,36 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
         )
 
         val shockIsDanger = shockValue == "1"
-        val shockColor = if (shockIsDanger) Color.Red else Color(0xFF0D47A1)
-        val shockText = if (shockValue == "1") "충격 감지!" else "정상"
-        DataCard("충격 감지", shockText, "", shockColor)
 
-        val distColor = Color(0XFF00897B)
-        DataCard("안전고리", distValue, "cm", distColor)
+        // 2. 충격 감지 카드
+        DataCard(
+            title = "충격 감지",
+            value = if (shockValue == "1") "충격 감지!" else "정상",
+            unit = "",
+            isDanger = shockIsDanger
+        )
+
+        // 3. 안전고리 카드 로직
+        val DIST_COUPLING_THRESHOLD = 3 // 기준 거리 3cm
+        val distInt = distValue.toIntOrNull() ?: 0
+
+        val distIsCoupled = distInt > DIST_COUPLING_THRESHOLD
+        val distIsDanger = !distIsCoupled
+
+        DataCard(
+            title = "안전고리 상태 (기준: $DIST_COUPLING_THRESHOLD cm)",
+            value = if (distIsCoupled) "체결" else "미체결",
+            unit = "",
+            isDanger = distIsDanger
+        )
 
         // -------------------------------------------------
         Spacer(modifier = Modifier.height(30.dp))
 
-        // 🔥 구글 지도 보기 버튼 추가
+        // 구글 지도 보기 버튼
         Button(
-            onClick = onNavigateToMap, // 화면 전환 함수 호출
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF673AB7)), // 보라색
+            onClick = onNavigateToMap,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF673AB7)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("저장된 위치 구글 지도에서 보기", color = Color.White)
@@ -304,13 +336,17 @@ fun BleSensorScreen(onNavigateToMap: () -> Unit) { // 지도 이동 람다 함�
 
 
 // ------------------------------------------------------------------
-// GasDataCard (가스 농도 전용 - 4분할 레이아웃)
+// GasDataCard (가스 농도 전용)
 // ------------------------------------------------------------------
 
 @Composable
 fun GasDataCard(gasValue: String, gasIsDanger: Boolean, dangerThreshold: Int) {
-    val cardColor = if (gasIsDanger) Color.Red else Color(0xFF00897B)
+
+    val safeColor = Color(0xFF81C784) // Light Green
+    val cardColor = if (gasIsDanger) Color.Red else safeColor
     val statusText = if (gasIsDanger) "평균 초과!!" else "정상"
+
+    val textColor = Color.White
 
     Card(
         modifier = Modifier
@@ -330,19 +366,9 @@ fun GasDataCard(gasValue: String, gasIsDanger: Boolean, dangerThreshold: Int) {
                 horizontalAlignment = Alignment.Start,
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = "가스 농도",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = "가스 농도", color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = statusText,
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+                Text(text = statusText, color = textColor, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
             }
 
             // [오른쪽 영역: 평균 농도 및 현재 농도]
@@ -350,19 +376,9 @@ fun GasDataCard(gasValue: String, gasIsDanger: Boolean, dangerThreshold: Int) {
                 horizontalAlignment = Alignment.Start,
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = "평균 농도: $dangerThreshold",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+                Text(text = "평균: $dangerThreshold", color = textColor, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "현재 농도: $gasValue",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+                Text(text = "현재: $gasValue", color = textColor, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
     }
@@ -370,29 +386,36 @@ fun GasDataCard(gasValue: String, gasIsDanger: Boolean, dangerThreshold: Int) {
 
 // DataCard (충격 및 거리 센서용)
 @Composable
-fun DataCard(title: String, value: String, unit: String, color: Color) {
-    Card(modifier = Modifier.fillMaxWidth().padding(8.dp), colors = CardDefaults.cardColors(containerColor = color)) {
+fun DataCard(title: String, value: String, unit: String, isDanger: Boolean) {
+
+    val safeColor = Color(0xFF81C784) // Light Green
+    val cardColor = if (isDanger) Color.Red else safeColor
+
+    val textColor = Color.White
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor)
+    ) {
         Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.Start) {
-            Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(value + unit, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(value + unit, color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
-// 🔥 실제 구글 지도 화면 구현
+// Google 지도 화면 구현 (변경 없음)
 @Composable
 fun MapScreen(onNavigateBack: () -> Unit) {
 
-    // 🔥 Firestore에서 가장 최근 GPS 좌표를 저장할 상태 변수
     var latestLocation by remember { mutableStateOf<LatLng?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var statusText by remember { mutableStateOf("최신 위치 정보 불러오는 중...") }
 
-    // 🔥 Firestore에서 가장 최근 데이터 가져오기 (문서 ID 기반)
+    // Firestore에서 가장 최근 데이터 가져오기 (문서 ID 기반)
     LaunchedEffect(Unit) {
         val db = FirebaseFirestore.getInstance()
         try {
-            // KST 시간 문자열을 기준으로 내림차순 정렬하여 가장 최근 문서 1개를 가져옵니다.
             val querySnapshot = db.collection("sensorData")
                 .orderBy("timestamp_kst", Query.Direction.DESCENDING)
                 .limit(1)
@@ -401,11 +424,10 @@ fun MapScreen(onNavigateBack: () -> Unit) {
 
             if (querySnapshot.documents.isNotEmpty()) {
                 val doc = querySnapshot.documents.first()
-                // Firestore는 기본적으로 Double 타입을 사용합니다.
                 val lat = doc.getDouble("latitude")
                 val lng = doc.getDouble("longitude")
 
-                if (lat != null && lng != null && (lat != 0.0 || lng != 0.0)) { // 0.0, 0.0 (그리니치) 제외 필터링
+                if (lat != null && lng != null && (lat != 0.0 || lng != 0.0)) {
                     latestLocation = LatLng(lat, lng)
                     statusText = "최신 위치: ${String.format("%.4f", lat)}, ${String.format("%.4f", lng)}"
                 } else {
@@ -439,12 +461,12 @@ fun MapScreen(onNavigateBack: () -> Unit) {
         // 구글 지도 영역
         if (latestLocation != null) {
             val cameraPositionState = rememberCameraPositionState {
-                position = CameraPosition.fromLatLngZoom(latestLocation!!, 15f) // 줌 레벨 15
+                position = CameraPosition.fromLatLngZoom(latestLocation!!, 15f)
             }
 
             GoogleMap(
                 modifier = Modifier
-                    .weight(1f) // 남은 공간 모두 사용
+                    .weight(1f)
                     .fillMaxWidth(),
                 cameraPositionState = cameraPositionState
             ) {
